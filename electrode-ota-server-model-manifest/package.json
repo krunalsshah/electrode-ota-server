@@ -10,6 +10,8 @@
     "prepublish": "npm run build"
   },
   "dependencies": {
+    "bluebird":"^3.5.1",
+    "binary-diff": "^1.0.0",
     "electrode-ota-server-diregister": "^4.4.8",
     "electrode-ota-server-util": "^4.4.8",
     "file-type": "^3.9.0",

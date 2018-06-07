@@ -14,6 +14,7 @@
     "electrode-ota-server-auth-github": "^4.4.8",
     "electrode-ota-server-auth-validate": "^4.4.8",
     "electrode-ota-server-dao-cassandra": "^4.4.8",
+    "electrode-ota-server-dao-mariadb": "^4.4.8",
     "electrode-ota-server-dao-plugin": "^4.4.8",
     "electrode-ota-server-diregister": "^4.4.8",
     "electrode-ota-server-errors": "^4.4.8",

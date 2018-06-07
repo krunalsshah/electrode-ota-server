@@ -83,12 +83,14 @@ This table links a deployment and a package.
 - ```package_id``` id of the package
 
 ##### package_diff
-This table represents metadata about a diff package that was created between two packages.  For example, suppose I release update #3, and there is a device has update #1.  When the device checks for an update, the system will create a diff between the content of update #3 and update #1 so that the device only needs to download files that changed.  The system creates a zip with the changed content and stores it.  This table has the url for the diff'ed zip.
+This table represents metadata about a diff package that was created between two packages.  For example, suppose I release update #3, and there is a device has update #1.  When the device checks for an update, the system will create a diff between the content of update #3 and update #1 so that the device only needs to download files that changed.  The system creates a zip with the changed content and stores it. By default (```bs_diff``` set to ```none```), the diff between the two packages is done at the file level, not the file content (i.e only new assets files are included in the diffed package), thus the full bundle is always included in the package. If ```bundle_diff``` is set to ```bsdiff```, a diff bundle will be created and included in the package.
+
 
 - ```left_package_id``` id for one of the packages being diff'ed
 - ```right_package_id``` id for the other package being diff'ed
 - ```size``` size of the zip containing the changed files
 - ```url``` url of the zip containing the changed files
+- ```bundle_diff``` the algorithm used to create bundle diff. Can be ```none``` (default -full bundle is packaged-) or ```bsdiff``` (bundle diff created with [bsdiff](http://www.daemonology.net/bsdiff/) algorithm -diff bundle is packaged-)
 
 ##### client_ratio
 When uploading an update, the developer has the choice of what percentage of devices should receive an update.  If the developer chooses a percentage less than 100, then as each device checks for an update, a random number is generated, and if it's within the threshold, it receives the update.  Otherwise it does not receive the update.  Since a random number is getting generated each time a client checks for an upate, this table is used to store what was generated for a given package and client.  The system will consult the table for the client first.  If no record exists, it will generate a new one and store it.

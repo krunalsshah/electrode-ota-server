@@ -21,8 +21,8 @@
     "@types/node" "*"
 
 "@types/node@*":
-  version "9.4.3"
-  resolved "https://registry.yarnpkg.com/@types/node/-/node-9.4.3.tgz#121b21929abfa537f47099d1d0b21b337fe2c8a5"
+  version "8.9.1"
+  resolved "https://registry.yarnpkg.com/@types/node/-/node-8.9.1.tgz#5a329d73a97f3c5a626dfe0ed8c0b831fee5357a"
 
 "@types/node@^8.0.24":
   version "8.9.1"

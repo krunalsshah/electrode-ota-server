@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "electrode-ota-server-dao-cassandra": "^4.4.8",
+    "electrode-ota-server-dao-mariadb": "^4.4.8",
     "electrode-ota-server-test-support": "^4.4.8",
     "electrode-ota-server-util-dev": "^4.4.8"
   }
