@@ -13,6 +13,7 @@ services:
       - 33060:3306
     volumes:
       - ./sql-tests/:/tests
+      - ./tmp/:/tmp
       - ./docker/common/:/common
   liquibase:
     ## location of Dockerfile for liquibase
