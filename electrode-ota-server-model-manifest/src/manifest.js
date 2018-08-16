@@ -454,7 +454,6 @@ export const generateBundleDiffPackage = async (download, upload, latestPackage,
     const installedBundleBuf = bundleBuffers[1];
     const diff = binaryDiff(installedBundleBuf, latestBundleBuf);
 
-
     const bla = await download(latestPackage.packageHash, latestPackage.blobUrl).then(({ content }) => streamToBuf(content));
     const blaZip = await yauzlFromBuffer(bla, { lazyEntries: true });
     

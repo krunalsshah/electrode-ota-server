@@ -15,7 +15,8 @@
     "electrode-ota-server-dao-mariadb": "^4.4.8",
     "electrode-ota-server-util": "^4.4.8",
     "electrode-server": "^1.2.2",
-    "packpath": "^0.1.0"
+    "packpath": "^0.1.0",
+    "electrode-ota-server-dao-mariadb": "^4.4.8"
   },
   "devDependencies": {
     "electrode-ota-server-util-dev": "^4.4.8"

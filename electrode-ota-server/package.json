@@ -15,7 +15,7 @@
     "electrode-ota-server-default-config": "^4.4.8",
     "electrode-server": "^1.2.2",
     "hapi": "^15.1.1",
-    "electrode-ota-server-dao-mariadb":"^4.4.8"
+    "electrode-ota-server-dao-mariadb": "^4.4.8"
   },
   "devDependencies": {
     "code-push": "^1.10.2-beta",
