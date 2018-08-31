@@ -14,7 +14,7 @@ module.exports.register = diregister({
         if (obj == null || obj === false || obj.enable === false ) {
             return resolve();
         }
-        const plugin = typeof obj.module != 'string' ? obj.module : require(obj.module);
+        const plugin = typeof obj.module != 'string' ? obj.module : require(obj.module.startsWith('electrode-ota-server-') ? `/Users/k0s00ly/workspace/walmart/electrode-ota-server/${obj.module}` : obj.module);
         register.call(this, plugin, obj.conf || {}, (e) => e ? reject(e) : resolve());
 
     }))).then(() => {

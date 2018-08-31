@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import fileType from 'file-type';
 import _ from 'lodash';
 import { Stream } from 'stream';
+import binaryDiff from 'binary-diff';
+import fs from 'fs';
 
 const MACOSX_DIR = "__MACOSX/";
 const DS_STORE = ".DS_Store";
@@ -39,6 +41,14 @@ export const toBuf = stream => new Promise((resolve, reject) => {
     });
 });
 
+export const yauzlFromBuffer = (buffer /* Buffer */, options /* yauzl.Options */) => {
+    return new Promise((resolve, reject) => { /* Promise<yauzl.ZipFile> */
+        yauzl.fromBuffer(buffer, options, (err, zipfile) => {
+            err ? reject(err) : resolve(zipfile)
+        })
+    })
+}
+
 export const zipToBuf = zip => toBuf(zip.outputStream);
 
 export const streamHash = (stream, hashType = 'sha256', digestType = 'hex') => {
@@ -67,6 +77,125 @@ export const streamToBuf = (stream) => {
         return toBuf(stream);
     }
 };
+
+export const getFileFromZip = (fileName /* string|RegExp */ , zipfile /* yauzl.ZipFile */) => {
+    return new Promise((resolve, reject) => { /* Promise<Buffer> */
+        let result
+        console.log(`==getFileFromZip`)
+        zipfile.readEntry();
+        zipfile.on("entry", (entry) => {
+            if (fileName instanceof RegExp ? fileName.test(entry.fileName) : entry.fileName === fileName) {
+                zipfile.openReadStream(entry, (err, readStream) => {
+                    if (err) { reject(err) }
+                    else {
+                        result = toBuf(readStream);
+                        console.log(`getFileFromZip readEntry`)
+                        zipfile.readEntry();
+                    }
+                });
+            } else {
+                zipfile.readEntry();
+            }
+        });
+        zipfile.once("end", () => {
+            console.log(`getFileFromZip end`)
+            zipfile.close();
+            resolve(result);
+        });
+        zipfile.on("error", e => reject(e))
+    })
+}
+
+export const modifyZip = ({
+    zipfile /* yauzl.ZipFile */,
+    filesToAdd = [], /* {buf: Buffer, metadataPath: string, opts: yazl.Options}[] */
+    filesToRemove = [] /* (string|RegExp)[] */
+}) => {
+    console.log(`filesToRemove: ${filesToRemove}`)
+    if (!zipfile) { throw new Error('Missing required parameter zipfile'); }
+    return new Promise((resolve, reject) => { /* Promise<yauzl.ZipFile> */
+        console.log(`Creating zip file`);
+        const zipResult = new yazl.ZipFile();
+        console.log(`Reading entry`);
+        zipfile.readEntry();
+        zipfile.on("entry", (entry) => {
+            console.log("on entry");
+            if (/\/$/.test(entry.fileName)) {
+                // Skip directories
+                console.log(`Directory, reading next entry`);
+                zipfile.readEntry();
+            } else if (filesToRemove.some(f => 
+                f instanceof RegExp 
+                ? f.test(entry.fileName) 
+                : f === entry.fileName)) {
+                // Skip files to remove (do not add them in resulting zip)
+                console.log(`Skipping entry`);
+                zipfile.readEntry();
+            } else {
+                // File entry, add it to resulting zip
+                zipfile.openReadStream(entry, function(err, readStream) {
+                    if (err) { console.log(err); reject(err); }
+                    console.log(`open read stream  for ${entry.fileName}`);
+                    zipResult.addReadStream(readStream, entry.fileName);
+                    console.log(`Adding ${entry.fileName}`);
+                    readStream.on("end", function() {
+                        console.log(`end called, reading next entry`);
+                        zipfile.readEntry();
+                    });
+                });
+                //zipfile.readEntry();
+            }
+        });
+        zipfile.once("end", () => {
+            console.log(`final end`);
+            filesToAdd.map(f => zipResult.addBuffer(f.buf, f.metadataPath, f.opts));
+            zipResult.end();
+            zipfile.close();
+            resolve(zipResult);
+        });
+        zipfile.on("error", e => { console.log(e); reject(e) })
+    })
+}
+
+export const addFileToZip = (fileToAdd /* Buffer */, metadataPath /* string */, zipfile /* yauzl.ZipFile */) => {
+    return new Promise((resolve, reject) => { /* Promise<yauzl.ZipFile> */
+        console.log(`Creating zip file`);
+        const zipResult = new yazl.ZipFile();
+        console.log(`Reading entry`);
+        zipfile.readEntry();
+        zipfile.on("entry", (entry) => {
+            console.log("on entry");
+            if (/\/$/.test(entry.fileName)) {
+                // directory. read next entry.
+                console.log(`Directory, reading next entry`);
+                zipfile.readEntry();
+            } else {
+                // file entry
+                zipfile.openReadStream(entry, function(err, readStream) {
+                    if (err) { console.log(err); reject(err); }
+                    console.log(`open read stream  for ${entry.fileName}`);
+                    zipResult.addReadStream(readStream, entry.fileName);
+                    console.log(`Adding ${entry.fileName}`);
+                    readStream.on("end", function() {
+                        console.log(`end called, reading next entry`);
+                        zipfile.readEntry();
+                    });
+                });
+                zipfile.readEntry();
+            }
+        });
+        zipfile.once("end", () => {
+            console.log(`final end`);
+            zipResult.addBuffer(fileToAdd, metadataPath, {compress: false});
+            zipResult.end();
+            zipfile.close();
+            resolve(zipResult);
+       resolve();
+        });
+        zipfile.on("error", e => { console.log(e); reject(e) })
+    })
+}
+
 
 /**
  * Takes a manifest dictionary of { "filename1": "file1hash", "filename2":"file2hash" ...} and generates the hash according to CodePush
@@ -139,10 +268,11 @@ export const generate = (buffer) => new Promise(function (resolve, reject) {
  * Deleted files are added to `hotcodepush.json` file in resultant zip
  *
  * @param {dictionary of filename to hash} manifest : current install's manifest
- * @param {zipped file as buffer} buffer   : new package to check manifest against
+ * @param {zipped file as buffer} buffer : new package to check manifest against
+ * @param {(string|Regex)[]} deletedFilesToIgnore : Array of deleted files to ignore (do not include them in hotcodepush.json)
  * @returns zip file of missing files, plus optional `hotcodepush.json` file
  */
-export const delta = (manifest, buffer) => {
+export const delta = (manifest, buffer, deletedFilesToIgnore) => {
     if (manifest instanceof Buffer) {
         manifest = JSON.parse(manifest.toString());
     }
@@ -166,10 +296,10 @@ export const delta = (manifest, buffer) => {
             zipfile.readEntry();
             zipfile.on("entry", function (entry) {
                 if (/\/$/.test(entry.fileName)) {
+                    // Skip directories
                     zipfile.readEntry();
                     return;
-                }
-                // file entry
+                } 
                 zipfile.openReadStream(entry, function (err, readStream) {
                     if (err) throw err;
                     streamHash(readStream).then(hash => {
@@ -183,11 +313,14 @@ export const delta = (manifest, buffer) => {
                         zipfile.readEntry();
                     });
                 });
-
             });
 
             zipfile.once("end", function () {
-                const deletedFiles = Object.keys(manifest).filter(v => seen.indexOf(v) == -1).sort();
+                let deletedFiles = Object.keys(manifest).filter(v => seen.indexOf(v) == -1).sort();
+                if (deletedFilesToIgnore) {
+                    deletedFiles = deletedFiles.filter(v => !deletedFilesToIgnore.some(f => f instanceof RegExp ? f.test(v) : f === v));
+                }
+                
                 const jsonContent = JSON.stringify({ deletedFiles });
                 retFile.addBuffer(new Buffer(jsonContent), "hotcodepush.json", { mtime: MTIME });
                 zipfile.close();
@@ -205,7 +338,7 @@ export const delta = (manifest, buffer) => {
 
 /**
  * For the current history, descend backwards generating, a manifestBlobUrl
- * and the appropriate download exampels.
+ * and the appropriate download examples.
  *
  * @param download
  * @param upload
@@ -234,7 +367,7 @@ export const genDiffPackageMap = (download, upload, current, histories = []) => 
     return downloadOrGenerateManifest(download, upload, current)
         .then(manifest => {
             return all(histories, function genDiffPackageMap$all(history) {
-                //For history in the histories, get its package,
+                // For history in the histories, get its package,
                 // and generate a delta between what was in it
                 // and what the current one is.
                 return download(history.packageHash, history.blobUrl)
@@ -243,7 +376,10 @@ export const genDiffPackageMap = (download, upload, current, histories = []) => 
                     .then(upload)
                     .then(({ blobUrl, size }) => {
                         const diffPackageMap = current.diffPackageMap || (current.diffPackageMap = {});
-                        diffPackageMap[history.packageHash] = { url: blobUrl, size };
+                        const diffEntry =  { url: blobUrl, size, bundleDiff: 'none' };
+                        diffPackageMap[history.packageHash] 
+                            ? diffPackageMap[history.packageHash].push(diffEntry)
+                            : diffPackageMap[history.packageHash] = [diffEntry];
                     });
             });
         });
@@ -272,12 +408,76 @@ export const generateDiffPackage = (download, upload, latestPackage, installedPa
                 .then(upload)
                 .then(({ blobUrl, size }) => {
                     const diffPackageMap = latestPackage.diffPackageMap || (latestPackage.diffPackageMap = {});
-                    diffPackageMap[installedPackage.packageHash] = {
+                    const diffEntry = {
                         url: blobUrl,
-                        size
+                        size,
+                        bundleDiff: 'none'
                     };
+                    diffPackageMap[installedPackage.packageHash] 
+                        ? diffPackageMap[installedPackage.packageHash].push(diffEntry)
+                        : diffPackageMap[installedPackage.packageHash] = [diffEntry];
                 });
         });
+};
+
+/**
+ * This function compares what the device has installed (based on what's in the table for given packageHash)
+ * to the latest available package.  It calls delta() to figure out which files in the latest package zip are
+ * different from what is in the manifest for the device-installed package.  It builds a new zip with
+ * just the changed files and uses upload to save it.
+ *
+ * @param {*} download injected class for downloading zips, manifests, and other blob content
+ * @param {*} upload injected class for uploading zips, manifests, and other blob content
+ * @param {*} latestPackage the newest package from the data store; what the device will upgrade to
+ * @param {*} installedPackage the package installed on the device requesting an update
+ * @param {*} bundleDiff bundle differential mode ('none' or 'bsdiff')
+ * @param {*} bundleFileName name of the bundle file
+ */
+export const generateBundleDiffPackage = async (download, upload, latestPackage, installedPackage, bundleDiff, bundleFileName) => {
+    const latestAndInstalledPackages = await Promise.all([ 
+        download(latestPackage.packageHash, latestPackage.blobUrl).then(({ content }) => streamToBuf(content)), 
+        download(installedPackage.packageHash, installedPackage.blobUrl).then(({ content }) => streamToBuf(content))
+    ]);
+    const latestPackageZipBuf = latestAndInstalledPackages[0];
+    const installedPackageZipBuf = latestAndInstalledPackages[1];
+    const latestPackageZips = await Promise.all([
+        yauzlFromBuffer(latestPackageZipBuf, { lazyEntries: true }),
+        yauzlFromBuffer(installedPackageZipBuf, { lazyEntries: true })
+    ]);
+    const latestPackageZip = latestPackageZips[0];
+    const installedPackageZip = latestPackageZips[1];
+    const bundleBuffers = await Promise.all([ 
+        getFileFromZip(new RegExp(`${bundleFileName}$`), latestPackageZip),
+        getFileFromZip(new RegExp(`${bundleFileName}$`), installedPackageZip)
+    ]);
+    const latestBundleBuf = bundleBuffers[0];
+    const installedBundleBuf = bundleBuffers[1];
+    const diff = binaryDiff(installedBundleBuf, latestBundleBuf);
+
+    const bla = await download(latestPackage.packageHash, latestPackage.blobUrl).then(({ content }) => streamToBuf(content));
+    const blaZip = await yauzlFromBuffer(bla, { lazyEntries: true });
+    
+
+    //const zippedResult = await addFileToZip(diff, 'bundle.diff', blaZip);
+    const zippedResult = await modifyZip({
+        zipfile: blaZip,
+        filesToAdd: [{buf: diff, metadataPath: 'bundle.diff', opts: { compress: false }}],
+        filesToRemove: [new RegExp(bundleFileName)]
+    })
+    const zippdResultBuf = await zipToBuf(zippedResult)
+    const installedPkgManifest = await downloadOrGenerateManifest(download, upload, installedPackage);
+    const deltaResults = await delta(installedPkgManifest, zippdResultBuf, [new RegExp(bundleFileName)]);
+    const deltaResultsBuf = await zipToBuf(deltaResults.zipFile);
+    const { blobUrl, size } = await upload(deltaResultsBuf);
+    const diffPackageMap = latestPackage.diffPackageMap || (latestPackage.diffPackageMap = {});
+    const diffEntry = {
+        bundleDiff,
+        url: blobUrl,
+        size
+    }
+    diffPackageMap[installedPackage.packageHash] 
+        ? diffPackageMap[installedPackage.packageHash].push(diffEntry)
+        : diffPackageMap[installedPackage.packageHash] = [diffEntry];
 };
 
 
@@ -298,9 +498,11 @@ export const diffPackageMap = (download, upload, histories) => {
     return Promise.all(promises).then(() => histories);
 };
 
-export const diffPackageMapCurrent = (download, upload, current) => {
+export const diffPackageMapCurrent = (download, upload, current, bundleDiff, bundleFileName) => {
     const last = current.length - 1;
-    return generateDiffPackage(download, upload, current[last], current[0]).then(() => current);
+    return (bundleDiff && bundleFileName) 
+        ? generateBundleDiffPackage(download, upload, current[last], current[0], bundleDiff, bundleFileName).then(() => current)
+        : generateDiffPackage(download, upload, current[last], current[0]).then(() => current);
 };
 
 export default ({

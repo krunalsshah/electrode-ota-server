@@ -15,7 +15,7 @@ import {
     PackageTagQueries,
 } from "../queries";
 
-import { difference, find } from "lodash";
+import { difference, differenceBy, includes, find } from "lodash";
 import { connect } from "net";
 
 import Encryptor from "../Encryptor";
@@ -124,26 +124,68 @@ export default class PackageDAO extends BaseDAO {
 
         // check if diffs changed
         if (packageInfo.diffPackageMap) {
-            // newDiffKeys will be a list of packageHash's for diffs that need to be added
-            const newDiffKeys = difference(Object.keys(packageInfo.diffPackageMap),
-                Object.keys(existing.diffPackageMap));
-            if (newDiffKeys.length > 0) {
-                const newDiffs = newDiffKeys.map((packageHash) => {
-                    return {
-                        packageHash,
-                        size: packageInfo.diffPackageMap[packageHash].size,
-                        url: packageInfo.diffPackageMap[packageHash].url,
-                    };
-                });
+            for (const packageHash of Object.keys(packageInfo.diffPackageMap)) {
+                if (includes(Object.keys(existing.diffPackageMap), packageHash)) {
+                    // Package hash already exist in diff package map, check diff entries
+                    const newBundleDiffs: any = differenceBy(
+                        packageInfo.diffPackageMap[packageHash],
+                        existing.diffPackageMap[packageHash],
+                        "bundleDiff");
+                    if (newBundleDiffs.length > 0) {
+                        const newDiffs = newBundleDiffs.map((b: any) => {
+                            return {
+                                bundleDiff: b.bundleDiff,
+                                packageHash,
+                                size: b.size,
+                                url: b.url,
+                            };
+                        });
+                        console.log(`newDiffs are JSON.stringify(${newDiffs})`)
+                        await PackageDAO.addPackageDiffs(connection, pkgId, newDiffs);
+                    }
 
-                await PackageDAO.addPackageDiffs(connection, pkgId, newDiffs);
+                    const removedBundleDiffs: any = differenceBy(
+                        existing.diffPackageMap[packageHash],
+                        packageInfo.diffPackageMap[packageHash],
+                        "bundleDiff");
+                    if (removedBundleDiffs.length > 0) {
+                        const pkgHashesAndBundleDiffToRemove = removedBundleDiffs.map((r: any) => ({
+                            bundleDiff: r.bundleDiff,
+                            pkgHash: packageHash,
+                        }));
+                        await PackageDAO.removePackageDiffs(connection, pkgId, pkgHashesAndBundleDiffToRemove);
+                    }
+                } else {
+                    // Package hash does not yet exist, add
+                    const newDiffs = packageInfo.diffPackageMap[packageHash].map((b: any) => {
+                        return {
+                            bundleDiff: b.bundleDiff,
+                            packageHash,
+                            size: b.size,
+                            url: b.url,
+                        };
+                    });
+                    console.log(`newDiffs are JSON.stringify(${newDiffs})`);
+                    await PackageDAO.addPackageDiffs(connection, pkgId, newDiffs);
+                }
             }
 
-            // remDiffKeys will be a list of packageHash's that need to be removed
-            const remDiffKeys = difference(Object.keys(existing.diffPackageMap),
+            //
+            // Removed Entries
+            const remDiffKeys = difference(
+                Object.keys(existing.diffPackageMap),
                 Object.keys(packageInfo.diffPackageMap));
             if (remDiffKeys.length > 0) {
-                await PackageDAO.removePackageDiffs(connection, pkgId, remDiffKeys);
+                for (const remDiffKey of remDiffKeys) {
+                    const pkgHashesAndBundleDiffToRemove = [];
+                    for (const diffPackage of existing.diffPackageMap[remDiffKey]) {
+                        pkgHashesAndBundleDiffToRemove.push({
+                            bundleDiff: diffPackage.bundleDiff,
+                            pkgHash: remDiffKey,
+                        });
+                    }
+                    await PackageDAO.removePackageDiffs(connection, pkgId, pkgHashesAndBundleDiffToRemove);
+                }
             }
         }
 
@@ -283,16 +325,18 @@ export default class PackageDAO extends BaseDAO {
         return Promise.all(pkgDiffs.map((pkgDiff) => {
             return PackageDAO.getPackageByHash(connection, pkgDiff.packageHash).then((pkgResults) => {
                 const rightPkgId = pkgResults[0].id;
-                return PackageDAO.insertPackageDiff(connection, pkgId, rightPkgId, pkgDiff.size, pkgDiff.url);
+                return PackageDAO.insertPackageDiff(
+                    connection, pkgId, rightPkgId, pkgDiff.size, pkgDiff.url, pkgDiff.bundleDiff);
             });
         }));
     }
 
-    private static async removePackageDiffs(connection: IConnection, pkgId: number, pkgHashes: string[]): Promise<any> {
-        return Promise.all(pkgHashes.map((pkgHash) => {
-            return PackageDAO.getPackageByHash(connection, pkgHash).then((pkgResults) => {
+    // pkgHashesAndBundleDiff : ({pkgHash: string, bundleDiff: string})[]
+    private static async removePackageDiffs(connection: IConnection, pkgId: number, pkgHashesAndBundleDiff: any[]): Promise<any> {
+        return Promise.all(pkgHashesAndBundleDiff.map((pkgHashAndBundleDiff) => {
+            return PackageDAO.getPackageByHash(connection, pkgHashAndBundleDiff.pkgHash).then((pkgResults) => {
                 const rightPkgId = pkgResults[0].id;
-                return PackageDAO.deletePackageDiff(connection, pkgId, rightPkgId);
+                return PackageDAO.deletePackageDiff(connection, pkgId, rightPkgId, pkgHashAndBundleDiff.bundleDiff);
             });
         }));
     }
@@ -310,14 +354,14 @@ export default class PackageDAO extends BaseDAO {
     }
 
     private static async insertPackageDiff(connection: IConnection, leftPkgId: number,
-        rightPkgId: number, size: number, url: string): Promise<any> {
+        rightPkgId: number, size: number, url: string, bundleDiff: string = 'none'): Promise<any> {
         return PackageDAO.query(connection, PackageDiffQueries.insertPackageDiff,
-            [leftPkgId, rightPkgId, size, url]);
+            [leftPkgId, rightPkgId, size, url, bundleDiff]);
     }
 
     private static async deletePackageDiff(connection: IConnection, leftPkgId: number,
-        rightPkgId: number): Promise<any> {
-        return PackageDAO.query(connection, PackageDiffQueries.deletePackageDiff, [leftPkgId, rightPkgId]);
+        rightPkgId: number, bundleDiff: string): Promise<any> {
+        return PackageDAO.query(connection, PackageDiffQueries.deletePackageDiff, [leftPkgId, rightPkgId, bundleDiff]);
     }
 
     private static async getPackageDiffs(connection: IConnection, pkgId: number): Promise<any> {
@@ -346,10 +390,16 @@ export default class PackageDAO extends BaseDAO {
 
     private static transformOutgoingPackageDiffs(pkgDiffs: any[]): any {
         return pkgDiffs.reduce((obj, pkgDiff) => {
-            obj[pkgDiff.package_hash] = {
+            const value = {
+                bundleDiff: pkgDiff.bundle_diff,
                 size: pkgDiff.size,
                 url: pkgDiff.url,
             };
+            if (obj[pkgDiff.package_hash]) {
+                obj[pkgDiff.package_hash].push(value);
+            } else {
+                obj[pkgDiff.package_hash] = [ value ];
+            }
             return obj;
         }, {} as any);
     }

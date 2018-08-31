@@ -174,8 +174,8 @@ WHERE deployment_id IN (1,2);
 
 -- package_diff
 INSERT INTO package_diff
-(left_package_id, right_package_id, size, url)
-VALUES(2, 1, 1294, 'http://location/of/diff/zip');
+(left_package_id, right_package_id, size, url, bundle_diff)
+VALUES(2, 1, 1294, 'http://location/of/diff/zip', 'none');
 
 SELECT pd.url, p.*
 FROM package_diff pd, package p

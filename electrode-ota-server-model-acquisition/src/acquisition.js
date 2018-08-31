@@ -16,11 +16,19 @@ export default (options, dao, weighted, _download, manifest, logger) => {
          * param isCompanion
          * param label
          * param clientUniqueId
+         * param bundleDiff
+         * param bundleFileName
          */
         updateCheck(params) {
+            if (!params.bundleDiff) {
+                params.bundleDiff = 'none'
+            }
+
+            console.log(`params are: ${JSON.stringify(params)}`)
 
             missingParameter(params.deploymentKey, `Deployment key missing`);
             missingParameter(params.appVersion, `appVersion missing`);
+            //missingParameter(params.bundleDiff !== 'none' && params.bundleFileName, `bundleFileName missing`);
 
             return dao.deploymentForKey(params.deploymentKey).then(async deployment => {
                 let pkg = deployment && deployment.package;
@@ -37,8 +45,8 @@ export default (options, dao, weighted, _download, manifest, logger) => {
                 pkg = await dao.getNewestApplicablePackage(params.deploymentKey, params.tags);
 
                 let isNotAvailable = pkg.packageHash == params.packageHash || !('clientUniqueId' in params)
-                        || version.gt(params.appVersion, pkg.appVersion)
-                        || pkg.isDisabled;
+                    || version.gt(params.appVersion, pkg.appVersion)
+                    || pkg.isDisabled;
 
                 const appVersion = fixver(pkg.appVersion);
 
@@ -61,7 +69,8 @@ export default (options, dao, weighted, _download, manifest, logger) => {
                     if (isAvailable) {
                         if (pkg.manifestBlobUrl && params.packageHash) {
                             const diffPackageMap = pkg.diffPackageMap || {};
-                            const partial = diffPackageMap[params.packageHash];
+                            const partial = diffPackageMap[params.packageHash] 
+                                         && diffPackageMap[params.packageHash].find(pkgDiff => pkgDiff.bundleDiff === params.bundleDiff);
                             if (partial) {
                                 ret.downloadURL = partial.url;
                                 ret.packageSize = partial.size;
@@ -70,16 +79,12 @@ export default (options, dao, weighted, _download, manifest, logger) => {
                                 return dao.historyByIds(deployment.history_)
                                     .then(history => history.filter(v => v.packageHash == params.packageHash))
                                     .then(matches => {
-                                        if (matches.length == 0) {
-                                            // No history of packages matching this hash.  Return no update.
-                                            logger.warn("No history of package: ", params.packageHash);
-                                            ret.isAvailable = false;
-                                            return ret;
-                                        }
-                                        return manifest(matches.concat(pkg)).then(v => {
+                                        return manifest(matches.concat(pkg), params.bundleDiff, params.bundleFileName).then(v => {
                                             const newPackage = v[v.length - 1];
                                             return dao.updatePackage(deployment.key, newPackage).then((pkgLast) => {
-                                                const p2 = newPackage.diffPackageMap && newPackage.diffPackageMap[params.packageHash];
+                                                const p2 = newPackage.diffPackageMap 
+                                                        && newPackage.diffPackageMap[params.packageHash]
+                                                        && newPackage.diffPackageMap[params.packageHash].find(p => p.bundleDiff === params.bundleDiff);
                                                 if (p2) {
                                                     ret.downloadURL = p2.url;
                                                     ret.packageSize = p2.size;

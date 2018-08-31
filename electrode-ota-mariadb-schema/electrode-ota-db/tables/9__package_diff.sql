@@ -14,3 +14,7 @@ CREATE TABLE package_diff (
 
 --changeset awhelms:electrode_ota_db_0_0_5 dbms:mysql
 ALTER TABLE package_diff MODIFY COLUMN size BIGINT UNSIGNED;
+
+--changeset belemaire:electrode_ota_db_0_0_11 dbms:mysql
+ALTER TABLE package_diff ADD COLUMN bundle_diff VARCHAR(32) NOT NULL DEFAULT 'none';
+ALTER TABLE package_diff DROP PRIMARY KEY, ADD PRIMARY KEY(left_package_id, right_package_id, bundle_diff);
