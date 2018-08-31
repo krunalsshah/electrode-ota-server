@@ -12,6 +12,7 @@
     "prepublish": "npm run build"
   },
   "dependencies": {
+    "electrode-ota-server-dao-mariadb": "^4.4.8",
     "electrode-ota-server-util": "^4.4.8",
     "electrode-server": "^1.2.2",
     "packpath": "^0.1.0"
